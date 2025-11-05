@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Infinite Wiki</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kosugi&display=swap" rel="stylesheet">
+    <style>
+      @keyframes blink {
+        from, to { opacity: 1 }
+        50% { opacity: 0; }
+      }
+      @keyframes skeleton-glow {
+        from { background-color: #e0e0e0; }
+        to { background-color: #f0f0f0; }
+      }
+
+      body {
+        background-color: #ffffff;
+        color: #000000;
+        font-family: 'Kosugi', sans-serif;
+        font-size: 1.1rem; /* Set base font size for the entire app */
+        line-height: 1.6; /* Set base line height for readability */
+        margin: 0;
+        padding: 2rem 2rem 5rem 2rem; /* Increased bottom padding for sticky footer */
+      }
+      #root {
+        max-width: 65ch; /* Optimal line length for readability */
+        margin: auto;
+      }
+      h1, h2, h3, h4, h5, h6 {
+        font-size: 1em; /* 1em equals the parent font-size, which is 1.1rem from body */
+        margin: 0;
+        font-weight: normal; /* Ensure no bolding by default */
+      }
+      button {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      .interactive-word {
+        color: #000000;
+        text-decoration: none;
+        transition: color 0.2s ease-in-out;
+      }
+      .interactive-word:hover {
+        color: #0000ff;
+        text-decoration: underline;
+      }
+      .footer-text {
+        font-size: 0.9em;
+        color: #888;
+      }
+      .footer-text a {
+        color: inherit;
+        text-decoration: none;
+        transition: color 0.2s ease-in-out;
+      }
+      .footer-text a:hover {
+        color: #0000ff;
+        text-decoration: underline;
+      }
+      .ascii-art {
+        font-family: monospace;
+        text-align: left;
+        white-space: pre;
+        color: #888;
+        margin: 2rem 0;
+        line-height: 1.1;
+        font-size: 0.8em;
+      }
+      .blinking-cursor {
+        animation: blink 1s step-end infinite;
+      }
+      .search-container {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        margin-bottom: 3rem;
+      }
+      .search-form {
+        flex-grow: 1;
+      }
+      .search-input {
+        width: 100%;
+        padding: 0.5rem 0.2rem;
+        font: inherit;
+        color: inherit;
+        border: none;
+        border-bottom: 1px solid transparent;
+        background-color: transparent;
+        box-sizing: border-box;
+        outline: none;
+      }
+      .search-input:disabled {
+        color: #ccc;
+      }
+      .search-input::placeholder {
+        color: #000000;
+        opacity: 1;
+      }
+      .random-button {
+        background: none;
+        border: none;
+        padding: 0.5rem 0;
+        font: inherit;
+        color: #000000;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .random-button:hover:not(:disabled) {
+        color: #0000ff;
+      }
+      .random-button:disabled {
+        color: #ccc;
+        cursor: not-allowed;
+      }
+      .sticky-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        text-align: center;
+        padding: 1.5rem 0;
+        background-color: #ffffff;
+      }
+      .skeleton-bar {
+        height: 1rem;
+        margin-bottom: 0.75rem;
+        animation: skeleton-glow 1.5s ease-in-out infinite alternate;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.7.0"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root">
+        <div class="search-container">
+            <form id="search-form" class="search-form" role="search">
+                <input type="text" id="search-input" placeholder="Search" class="search-input" aria-label="Search for a topic">
+            </form>
+            <button id="random-button" class="random-button">Random</button>
+        </div>
+        
+        <header style="text-align: center; margin-bottom: 2rem;">
+            <h1 style="letter-spacing: 0.2em; text-transform: uppercase;">INFINITE WIKI</h1>
+            <pre id="ascii-art" class="ascii-art" aria-label="ASCII art for the current topic">*</pre>
+        </header>
+        
+        <main>
+            <div>
+                <h2 id="topic-title" style="margin-bottom: 2rem; text-transform: capitalize;"></h2>
+                <div id="error-display" style="display: none; border: 1px solid #cc0000; padding: 1rem; color: #cc0000;">
+                  <p style="margin: 0;">An Error Occurred</p>
+                  <p id="error-message" style="margin-top: 0.5rem; margin: 0;"></p>
+                </div>
+                <div id="content-display">
+                    <!-- Content or skeleton loader goes here -->
+                </div>
+            </div>
+        </main>
+    
+        <footer class="sticky-footer">
+            <p class="footer-text" style="margin: 0;">
+                Infinite Wiki by <a href="https://x.com/dev_valladares" target="_blank" rel="noopener noreferrer">Dev Valladares</a> · Generated by Gemini 2.5 Flash Lite
+                <span id="generation-time"></span>
+            </p>
+        </footer>
+    </div>
+    <script type="module">
+        import { GoogleGenAI } from '@google/genai';
+
+        // --- 1. CONFIGURATION & CONSTANTS ---
+        const PREDEFINED_WORDS = ['Balance', 'Harmony', 'Discord', 'Unity', 'Fragmentation', 'Clarity', 'Ambiguity', 'Presence', 'Absence', 'Creation', 'Destruction', 'Light', 'Shadow', 'Beginning', 'Ending', 'Rising', 'Falling', 'Connection', 'Isolation', 'Hope', 'Despair', 'Order and chaos', 'Light and shadow', 'Sound and silence', 'Form and formlessness', 'Being and nonbeing', 'Presence and absence', 'Motion and stillness', 'Unity and multiplicity', 'Finite and infinite', 'Sacred and profane', 'Memory and forgetting', 'Question and answer', 'Search and discovery', 'Journey and destination', 'Dream and reality', 'Time and eternity', 'Self and other', 'Known and unknown', 'Spoken and unspoken', 'Visible and invisible', 'Zigzag', 'Waves', 'Spiral', 'Bounce', 'Slant', 'Drip', 'Stretch', 'Squeeze', 'Float', 'Fall', 'Spin', 'Melt', 'Rise', 'Twist', 'Explode', 'Stack', 'Mirror', 'Echo', 'Vibrate', 'Gravity', 'Friction', 'Momentum', 'Inertia', 'Turbulence', 'Pressure', 'Tension', 'Oscillate', 'Fractal', 'Quantum', 'Entropy', 'Vortex', 'Resonance', 'Equilibrium', 'Centrifuge', 'Elastic', 'Viscous', 'Refract', 'Diffuse', 'Cascade', 'Levitate', 'Magnetize', 'Polarize', 'Accelerate', 'Compress', 'Undulate', 'Liminal', 'Ephemeral', 'Paradox', 'Zeitgeist', 'Metamorphosis', 'Synesthesia', 'Recursion', 'Emergence', 'Dialectic', 'Apophenia', 'Limbo', 'Flux', 'Sublime', 'Uncanny', 'Palimpsest', 'Chimera', 'Void', 'Transcend', 'Ineffable', 'Qualia', 'Gestalt', 'Simulacra', 'Abyssal', 'Existential', 'Nihilism', 'Solipsism', 'Phenomenology', 'Hermeneutics', 'Deconstruction', 'Postmodern', 'Absurdism', 'Catharsis', 'Epiphany', 'Melancholy', 'Nostalgia', 'Longing', 'Reverie', 'Pathos', 'Ethos', 'Logos', 'Mythos', 'Anamnesis', 'Intertextuality', 'Metafiction', 'Stream', 'Lacuna', 'Caesura', 'Enjambment'];
+        const UNIQUE_WORDS = [...new Set(PREDEFINED_WORDS)];
+
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const artModelName = 'gemini-2.5-flash';
+        const textModelName = 'gemini-2.5-flash-lite';
+        const ENABLE_THINKING_FOR_ASCII_ART = false;
+
+        // --- 2. DOM ELEMENT REFERENCES ---
+        const searchForm = document.getElementById('search-form');
+        const searchInput = document.getElementById('search-input');
+        const randomButton = document.getElementById('random-button');
+        const asciiArtPre = document.getElementById('ascii-art');
+        const topicTitle = document.getElementById('topic-title');
+        const contentDisplay = document.getElementById('content-display');
+        const errorDisplay = document.getElementById('error-display');
+        const errorMessageEl = document.getElementById('error-message');
+        const generationTimeSpan = document.getElementById('generation-time');
+
+        // --- 3. STATE MANAGEMENT ---
+        let currentTopic = '';
+        let isLoading = false;
+        let asciiArtInterval;
+        let generationStartTime;
+
+        // --- 4. GEMINI SERVICE FUNCTIONS ---
+        const createFallbackArt = (topic) => {
+          const displayableTopic = topic.length > 20 ? topic.substring(0, 17) + '...' : topic;
+          const paddedTopic = ` ${displayableTopic} `;
+          const topBorder = `┌${'─'.repeat(paddedTopic.length)}┐`;
+          const middle = `│${paddedTopic}│`;
+          const bottomBorder = `└${'─'.repeat(paddedTopic.length)}┘`;
+          return { art: `${topBorder}\n${middle}\n${bottomBorder}` };
+        };
+
+        async function* streamDefinition(topic) {
+          if (!process.env.API_KEY) {
+            yield 'Error: API_KEY is not configured. Please check your environment variables to continue.';
+            return;
+          }
+          const prompt = `Provide a concise, single-paragraph encyclopedia-style definition for the term: "${topic}". Be informative and neutral. Do not use markdown, titles, or any special formatting. Respond with only the text of the definition itself.`;
+          try {
+            const response = await ai.models.generateContentStream({
+              model: textModelName,
+              contents: prompt,
+              config: { thinkingConfig: { thinkingBudget: 0 } },
+            });
+            for await (const chunk of response) {
+              if (chunk.text) yield chunk.text;
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+            yield `Error: Could not generate content for "${topic}". ${errorMessage}`;
+            throw new Error(errorMessage);
+          }
+        }
+
+        async function generateAsciiArt(topic) {
+            if (!process.env.API_KEY) throw new Error('API_KEY is not configured.');
+            const artPromptPart = `1. "art": meta ASCII visualization of the word "${topic}":\n- Palette: │─┌┐└┘├┤┬┴┼►◄▲▼○●◐◑░▒▓█▀▄■□▪▫★☆♦♠♣♥⟨⟩/\\_|\n- Shape mirrors concept - make the visual form embody the word's essence\n- Examples: \n  * "explosion" → radiating lines from center\n  * "hierarchy" → pyramid structure\n  * "flow" → curved directional lines\n- Return as single string with \\n for line breaks`;
+            const prompt = `For "${topic}", create a JSON object with one key: "art".\n${artPromptPart}\n\nReturn ONLY the raw JSON object, no additional text. The response must start with "{" and end with "}" and contain only the art property.`;
+            try {
+                const config = { responseMimeType: 'application/json' };
+                if (!ENABLE_THINKING_FOR_ASCII_ART) {
+                    config.thinkingConfig = { thinkingBudget: 0 };
+                }
+                const response = await ai.models.generateContent({ model: artModelName, contents: prompt, config: config });
+                let jsonStr = response.text.trim().match(/\{.*\}/s)?.[0] || '{}';
+                const parsedData = JSON.parse(jsonStr);
+                if (typeof parsedData.art !== 'string' || parsedData.art.trim().length === 0) {
+                    throw new Error('Invalid or empty ASCII art in response');
+                }
+                return parsedData;
+            } catch (error) {
+                console.warn(`Failed to generate ASCII art for "${topic}":`, error.message);
+                return createFallbackArt(topic);
+            }
+        }
+
+        // --- 5. UI UPDATE FUNCTIONS ---
+        function toggleLoading(loading) {
+            isLoading = loading;
+            searchInput.disabled = loading;
+            randomButton.disabled = loading;
+        }
+        
+        function displayAsciiArt(artData) {
+            if (asciiArtInterval) clearInterval(asciiArtInterval);
+            let visibleContent = '';
+            asciiArtPre.textContent = '';
+            let isStreaming = true;
+
+            const fullText = artData.art;
+            let currentIndex = 0;
+            const cursor = document.createElement('span');
+            cursor.className = 'blinking-cursor';
+            cursor.textContent = '|';
+
+            asciiArtInterval = setInterval(() => {
+                if (currentIndex < fullText.length) {
+                    visibleContent += fullText[currentIndex];
+                    asciiArtPre.textContent = visibleContent;
+                    if(isStreaming) asciiArtPre.appendChild(cursor);
+                    currentIndex++;
+                } else {
+                    clearInterval(asciiArtInterval);
+                    isStreaming = false;
+                    asciiArtPre.textContent = fullText;
+                }
+            }, 5);
+        }
+
+        function displayContent(fullContent, isStreaming) {
+            contentDisplay.innerHTML = '';
+            const p = document.createElement('p');
+            p.style.margin = 0;
+
+            if (isStreaming) {
+                p.textContent = fullContent;
+                const cursor = document.createElement('span');
+                cursor.className = 'blinking-cursor';
+                cursor.textContent = '|';
+                p.appendChild(cursor);
+            } else {
+                const words = fullContent.split(/(\s+)/);
+                words.forEach(word => {
+                    if (/\S/.test(word)) {
+                        const cleanWord = word.replace(/[.,!?;:()"']/g, '');
+                        if (cleanWord) {
+                            const button = document.createElement('button');
+                            button.textContent = word;
+                            button.className = 'interactive-word';
+                            button.setAttribute('aria-label', `Learn more about ${cleanWord}`);
+                            button.dataset.word = cleanWord;
+                            p.appendChild(button);
+                        } else {
+                           const span = document.createElement('span');
+                           span.textContent = word;
+                           p.appendChild(span);
+                        }
+                    } else {
+                        const span = document.createElement('span');
+                        span.textContent = word;
+                        p.appendChild(span);
+                    }
+                });
+            }
+            contentDisplay.appendChild(p);
+        }
+
+        function displayError(message) {
+            contentDisplay.innerHTML = '';
+            errorMessageEl.textContent = message;
+            errorDisplay.style.display = 'block';
+        }
+        
+        function renderSkeleton() {
+            contentDisplay.innerHTML = '';
+            const widths = ['100%', '83.33%', '100%', '75%', '66.66%'];
+            widths.forEach(width => {
+                const bar = document.createElement('div');
+                bar.className = 'skeleton-bar';
+                bar.style.width = width;
+                contentDisplay.appendChild(bar);
+            });
+        }
+
+        function clearUIForNewTopic(topic) {
+            toggleLoading(true);
+            currentTopic = topic;
+            topicTitle.textContent = topic;
+            errorDisplay.style.display = 'none';
+            asciiArtPre.textContent = '*';
+            generationTimeSpan.textContent = '';
+            generationStartTime = performance.now();
+            renderSkeleton();
+        }
+
+        // --- 6. CORE LOGIC ---
+        async function fetchAndDisplayTopic(topic) {
+            if (isLoading) return;
+            clearUIForNewTopic(topic);
+            
+            // Start art generation without awaiting
+            generateAsciiArt(topic).then(art => {
+                if(topic === currentTopic) displayAsciiArt(art);
+            });
+            
+            let accumulatedContent = '';
+            try {
+                for await (const chunk of streamDefinition(topic)) {
+                    if (topic !== currentTopic) return; // Abort if topic changed
+                    if (chunk.startsWith('Error:')) throw new Error(chunk);
+                    accumulatedContent += chunk;
+                    displayContent(accumulatedContent, true);
+                }
+            } catch (e) {
+                if (topic === currentTopic) displayError(e.message);
+                toggleLoading(false);
+                return;
+            }
+            
+            if (topic === currentTopic) {
+                displayContent(accumulatedContent, false);
+                const endTime = performance.now();
+                generationTimeSpan.textContent = ` · ${Math.round(endTime - generationStartTime)}ms`;
+                toggleLoading(false);
+            }
+        }
+
+        // --- 7. EVENT HANDLERS ---
+        function handleSearchSubmit(event) {
+            event.preventDefault();
+            const newTopic = searchInput.value.trim();
+            if (newTopic && newTopic.toLowerCase() !== currentTopic.toLowerCase()) {
+                fetchAndDisplayTopic(newTopic);
+                searchInput.value = '';
+            }
+        }
+
+        function handleRandomClick() {
+            const randomIndex = Math.floor(Math.random() * UNIQUE_WORDS.length);
+            let randomWord = UNIQUE_WORDS[randomIndex];
+            if (randomWord.toLowerCase() === currentTopic.toLowerCase()) {
+                randomWord = UNIQUE_WORDS[(randomIndex + 1) % UNIQUE_WORDS.length];
+            }
+            fetchAndDisplayTopic(randomWord);
+        }
+
+        function handleWordClick(event) {
+            if (isLoading) return;
+            const target = event.target;
+            if (target.matches('button.interactive-word')) {
+                const newTopic = target.dataset.word;
+                if (newTopic && newTopic.toLowerCase() !== currentTopic.toLowerCase()) {
+                    fetchAndDisplayTopic(newTopic);
+                }
+            }
+        }
+
+        // --- 8. INITIALIZATION ---
+        function init() {
+            searchForm.addEventListener('submit', handleSearchSubmit);
+            randomButton.addEventListener('click', handleRandomClick);
+            contentDisplay.addEventListener('click', handleWordClick);
+            fetchAndDisplayTopic('Hypertext');
+        }
+
+        init();
+    </script>
+</body>
+</html>
