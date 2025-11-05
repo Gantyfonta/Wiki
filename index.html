@@ -65,15 +65,6 @@
         color: #0000ff;
         text-decoration: underline;
       }
-      .ascii-art {
-        font-family: monospace;
-        text-align: left;
-        white-space: pre;
-        color: #888;
-        margin: 2rem 0;
-        line-height: 1.1;
-        font-size: 0.8em;
-      }
       .blinking-cursor {
         animation: blink 1s step-end infinite;
       }
@@ -149,7 +140,7 @@
         font-weight: 600;
       }
       .search-result {
-        margin-bottom: 1rem;
+        margin-bottom: 1.5rem;
       }
       .search-result-link {
         display: block;
@@ -167,6 +158,22 @@
         word-break: break-all;
         margin: 0;
       }
+      .more-button {
+        border: 1px solid #888;
+        padding: 0.5rem 1.5rem;
+        border-radius: 2rem;
+        transition: background-color 0.2s, color 0.2s;
+        color: #888;
+      }
+      .more-button:hover:not(:disabled) {
+        background-color: #000;
+        color: #fff;
+        border-color: #000;
+      }
+      .more-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
     </style>
   <script type="importmap">
 {
@@ -178,17 +185,16 @@
 </head>
 <body>
     <div id="root" style="display: none;">
+        <header style="text-align: center; margin-bottom: 2rem;">
+            <h1 style="letter-spacing: 0.2em; text-transform: uppercase;">INFINITE WIKI</h1>
+        </header>
+
         <div class="search-container">
             <form id="search-form" class="search-form" role="search">
                 <input type="text" id="search-input" placeholder="Search" class="search-input" aria-label="Search for a topic">
             </form>
             <button id="random-button" class="random-button">Random</button>
         </div>
-        
-        <header style="text-align: center; margin-bottom: 2rem;">
-            <h1 style="letter-spacing: 0.2em; text-transform: uppercase;">INFINITE WIKI</h1>
-            <pre id="ascii-art" class="ascii-art" aria-label="ASCII art for the current topic">*</pre>
-        </header>
         
         <main>
             <div>
@@ -199,6 +205,9 @@
                 </div>
                 <div id="content-display">
                     <!-- Content or skeleton loader goes here -->
+                </div>
+                <div id="more-button-container" style="text-align: center; margin: 2rem 0; display: none;">
+                    <button id="more-button" class="more-button">More</button>
                 </div>
                 <div id="search-results-container" style="display: none;"></div>
             </div>
@@ -220,18 +229,17 @@
         const UNIQUE_WORDS = [...new Set(PREDEFINED_WORDS)];
 
         let ai;
-        const artModelName = 'gemini-2.5-flash';
         const textModelName = 'gemini-2.5-flash';
-        const ENABLE_THINKING_FOR_ASCII_ART = false;
 
         // --- 2. DOM ELEMENT REFERENCES ---
         const rootContainer = document.getElementById('root');
         const searchForm = document.getElementById('search-form');
         const searchInput = document.getElementById('search-input');
         const randomButton = document.getElementById('random-button');
-        const asciiArtPre = document.getElementById('ascii-art');
         const topicTitle = document.getElementById('topic-title');
         const contentDisplay = document.getElementById('content-display');
+        const moreButtonContainer = document.getElementById('more-button-container');
+        const moreButton = document.getElementById('more-button');
         const searchResultsContainer = document.getElementById('search-results-container');
         const errorDisplay = document.getElementById('error-display');
         const errorMessageEl = document.getElementById('error-message');
@@ -240,19 +248,9 @@
         // --- 3. STATE MANAGEMENT ---
         let currentTopic = '';
         let isLoading = false;
-        let asciiArtInterval;
         let generationStartTime;
 
         // --- 4. GEMINI SERVICE FUNCTIONS ---
-        const createFallbackArt = (topic) => {
-          const displayableTopic = topic.length > 20 ? topic.substring(0, 17) + '...' : topic;
-          const paddedTopic = ` ${displayableTopic} `;
-          const topBorder = `┌${'─'.repeat(paddedTopic.length)}┐`;
-          const middle = `│${paddedTopic}│`;
-          const bottomBorder = `└${'─'.repeat(paddedTopic.length)}┘`;
-          return { art: `${topBorder}\n${middle}\n${bottomBorder}` };
-        };
-        
         async function generateDefinitionAndSearchResults(topic) {
             if (!ai) throw new Error('Gemini AI is not initialized.');
             const prompt = `Provide a concise, single-paragraph encyclopedia-style definition for the term: "${topic}". Be informative and neutral. Do not use markdown, titles, or any special formatting. Respond with only the text of the definition itself.`;
@@ -276,59 +274,25 @@
             }
         }
 
-        async function generateAsciiArt(topic) {
+        async function generateMoreInfo(topic) {
             if (!ai) throw new Error('Gemini AI is not initialized.');
-            const artPromptPart = `1. "art": meta ASCII visualization of the word "${topic}":\n- Palette: │─┌┐└┘├┤┬┴┼►◄▲▼○●◐◑░▒▓█▀▄■□▪▫★☆♦♠♣♥⟨⟩/\\_|\n- Shape mirrors concept - make the visual form embody the word's essence\n- Examples: \n  * "explosion" → radiating lines from center\n  * "hierarchy" → pyramid structure\n  * "flow" → curved directional lines\n- Return as single string with \\n for line breaks`;
-            const prompt = `For "${topic}", create a JSON object with one key: "art".\n${artPromptPart}\n\nReturn ONLY the raw JSON object, no additional text. The response must start with "{" and end with "}" and contain only the art property.`;
-            try {
-                const config = { responseMimeType: 'application/json' };
-                if (!ENABLE_THINKING_FOR_ASCII_ART) {
-                    config.thinkingConfig = { thinkingBudget: 0 };
-                }
-                const response = await ai.models.generateContent({ model: artModelName, contents: prompt, config: config });
-                let jsonStr = response.text.trim().match(/\{.*\}/s)?.[0] || '{}';
-                const parsedData = JSON.parse(jsonStr);
-                if (typeof parsedData.art !== 'string' || parsedData.art.trim().length === 0) {
-                    throw new Error('Invalid or empty ASCII art in response');
-                }
-                return parsedData;
-            } catch (error) {
-                console.warn(`Failed to generate ASCII art for "${topic}":`, error.message);
-                return createFallbackArt(topic);
-            }
+            const prompt = `Provide a more detailed, multi-paragraph explanation for the term: "${topic}". Expand on its history, significance, and different facets. Be informative and neutral. Do not use markdown, titles, or any special formatting. Respond with only the text of the explanation itself.`;
+
+            const response = await ai.models.generateContent({
+                model: textModelName,
+                contents: prompt,
+            });
+
+            return response.text;
         }
+
 
         // --- 5. UI UPDATE FUNCTIONS ---
         function toggleLoading(loading) {
             isLoading = loading;
             searchInput.disabled = loading;
             randomButton.disabled = loading;
-        }
-        
-        function displayAsciiArt(artData) {
-            if (asciiArtInterval) clearInterval(asciiArtInterval);
-            let visibleContent = '';
-            asciiArtPre.textContent = '';
-            let isStreaming = true;
-
-            const fullText = artData.art;
-            let currentIndex = 0;
-            const cursor = document.createElement('span');
-            cursor.className = 'blinking-cursor';
-            cursor.textContent = '|';
-
-            asciiArtInterval = setInterval(() => {
-                if (currentIndex < fullText.length) {
-                    visibleContent += fullText[currentIndex];
-                    asciiArtPre.textContent = visibleContent;
-                    if(isStreaming) asciiArtPre.appendChild(cursor);
-                    currentIndex++;
-                } else {
-                    clearInterval(asciiArtInterval);
-                    isStreaming = false;
-                    asciiArtPre.textContent = fullText;
-                }
-            }, 5);
+            moreButton.disabled = loading;
         }
 
         function displayContent(fullContent) {
@@ -369,31 +333,35 @@
 
             const validResults = results.filter(r => r.web && r.web.uri && r.web.title);
             if (validResults.length === 0) return;
+            
+            const topTwoResults = validResults.slice(0, 2);
 
             const heading = document.createElement('h3');
             heading.className = 'search-results-heading';
-            heading.textContent = 'Top Web Result';
+            heading.textContent = 'Top Web Results';
             searchResultsContainer.appendChild(heading);
-
-            const topResult = validResults[0].web;
-
-            const item = document.createElement('div');
-            item.className = 'search-result';
-
-            const link = document.createElement('a');
-            link.className = 'search-result-link';
-            link.href = topResult.uri;
-            link.textContent = topResult.title;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-
-            const uri = document.createElement('p');
-            uri.className = 'search-result-uri';
-            uri.textContent = topResult.uri;
             
-            item.appendChild(link);
-            item.appendChild(uri);
-            searchResultsContainer.appendChild(item);
+            topTwoResults.forEach(resultData => {
+                const topResult = resultData.web;
+                const item = document.createElement('div');
+                item.className = 'search-result';
+
+                const link = document.createElement('a');
+                link.className = 'search-result-link';
+                link.href = topResult.uri;
+                link.textContent = topResult.title;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+
+                const uri = document.createElement('p');
+                uri.className = 'search-result-uri';
+                uri.textContent = topResult.uri;
+                
+                item.appendChild(link);
+                item.appendChild(uri);
+                searchResultsContainer.appendChild(item);
+            });
+
 
             searchResultsContainer.style.display = 'block';
         }
@@ -436,17 +404,12 @@
             window.location.hash = encodeURIComponent(currentTopic);
 
             renderSkeletonLoader();
-            displayAsciiArt({ art: '...' });
             searchResultsContainer.style.display = 'none';
             searchResultsContainer.innerHTML = '';
+            moreButtonContainer.style.display = 'none';
 
             try {
-                const artPromise = generateAsciiArt(currentTopic);
-                const contentPromise = generateDefinitionAndSearchResults(currentTopic);
-                
-                const [artData, contentData] = await Promise.all([artPromise, contentPromise]);
-
-                displayAsciiArt(artData);
+                const contentData = await generateDefinitionAndSearchResults(currentTopic);
 
                 if (contentData.definition && contentData.definition.trim().length > 0) {
                     contentDisplay.innerHTML = ''; // Clear skeleton
@@ -456,6 +419,9 @@
                 }
                 
                 displaySearchResults(contentData.searchResults);
+
+                moreButton.disabled = false;
+                moreButtonContainer.style.display = 'block';
 
             } catch (error) {
                 console.error("Error fetching topic:", error);
@@ -497,6 +463,27 @@
                 }
             }
         });
+        
+        moreButton.addEventListener('click', async () => {
+            if (isLoading || !currentTopic) return;
+            
+            moreButton.disabled = true;
+            moreButton.textContent = 'Loading...';
+            
+            try {
+                const moreContent = await generateMoreInfo(currentTopic);
+                displayContent(moreContent); // This will replace the old content.
+                moreButtonContainer.style.display = 'none'; // Hide button after use.
+            } catch (error) {
+                console.error("Error fetching more info:", error);
+                // Maybe show a small error message near the button? For now, just log it.
+                moreButton.textContent = 'Error';
+            } finally {
+                moreButton.disabled = false;
+                moreButton.textContent = 'More';
+            }
+        });
+
 
         window.addEventListener('hashchange', () => {
             const newTopic = decodeURIComponent(window.location.hash.substring(1));
