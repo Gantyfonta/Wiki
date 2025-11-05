@@ -135,6 +135,38 @@
         margin-bottom: 0.75rem;
         animation: skeleton-glow 1.5s ease-in-out infinite alternate;
       }
+      .search-results-container {
+        margin-top: 2.5rem;
+        border-top: 1px solid #e0e0e0;
+        padding-top: 2rem;
+      }
+      .search-results-heading {
+        font-size: 0.8em;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+      }
+      .search-result {
+        margin-bottom: 1rem;
+      }
+      .search-result-link {
+        display: block;
+        font-size: 1em;
+        color: #0000ff;
+        text-decoration: none;
+        margin-bottom: 0.25rem;
+      }
+      .search-result-link:hover {
+        text-decoration: underline;
+      }
+      .search-result-uri {
+        font-size: 0.8em;
+        color: #888;
+        word-break: break-all;
+        margin: 0;
+      }
     </style>
   <script type="importmap">
 {
@@ -168,6 +200,7 @@
                 <div id="content-display">
                     <!-- Content or skeleton loader goes here -->
                 </div>
+                <div id="search-results-container" style="display: none;"></div>
             </div>
         </main>
     
@@ -188,7 +221,7 @@
 
         let ai;
         const artModelName = 'gemini-2.5-flash';
-        const textModelName = 'gemini-2.5-flash-lite';
+        const textModelName = 'gemini-2.5-flash';
         const ENABLE_THINKING_FOR_ASCII_ART = false;
 
         // --- 2. DOM ELEMENT REFERENCES ---
@@ -199,6 +232,7 @@
         const asciiArtPre = document.getElementById('ascii-art');
         const topicTitle = document.getElementById('topic-title');
         const contentDisplay = document.getElementById('content-display');
+        const searchResultsContainer = document.getElementById('search-results-container');
         const errorDisplay = document.getElementById('error-display');
         const errorMessageEl = document.getElementById('error-message');
         const generationTimeSpan = document.getElementById('generation-time');
@@ -218,27 +252,28 @@
           const bottomBorder = `└${'─'.repeat(paddedTopic.length)}┘`;
           return { art: `${topBorder}\n${middle}\n${bottomBorder}` };
         };
+        
+        async function generateDefinitionAndSearchResults(topic) {
+            if (!ai) throw new Error('Gemini AI is not initialized.');
+            const prompt = `Provide a concise, single-paragraph encyclopedia-style definition for the term: "${topic}". Be informative and neutral. Do not use markdown, titles, or any special formatting. Respond with only the text of the definition itself.`;
+            
+            try {
+                const response = await ai.models.generateContent({
+                    model: textModelName,
+                    contents: prompt,
+                    config: {
+                        tools: [{googleSearch: {}}],
+                    },
+                });
 
-        async function* streamDefinition(topic) {
-          if (!ai) {
-             yield 'Error: Gemini AI is not initialized. Please configure your API key.';
-             return;
-          }
-          const prompt = `Provide a concise, single-paragraph encyclopedia-style definition for the term: "${topic}". Be informative and neutral. Do not use markdown, titles, or any special formatting. Respond with only the text of the definition itself.`;
-          try {
-            const response = await ai.models.generateContentStream({
-              model: textModelName,
-              contents: prompt,
-              config: { thinkingConfig: { thinkingBudget: 0 } },
-            });
-            for await (const chunk of response) {
-              if (chunk.text) yield chunk.text;
+                return {
+                    definition: response.text,
+                    searchResults: response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [],
+                };
+            } catch (error) {
+                console.error(`Error generating content for "${topic}":`, error);
+                throw new Error(`Failed to generate content. ${error.message}`);
             }
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-            yield `Error: Could not generate content for "${topic}". ${errorMessage}`;
-            throw new Error(errorMessage);
-          }
         }
 
         async function generateAsciiArt(topic) {
@@ -296,42 +331,71 @@
             }, 5);
         }
 
-        function displayContent(fullContent, isStreaming) {
+        function displayContent(fullContent) {
             contentDisplay.innerHTML = '';
             const p = document.createElement('p');
             p.style.margin = 0;
 
-            if (isStreaming) {
-                p.textContent = fullContent;
-                const cursor = document.createElement('span');
-                cursor.className = 'blinking-cursor';
-                cursor.textContent = '|';
-                p.appendChild(cursor);
-            } else {
-                const words = fullContent.split(/(\s+)/);
-                words.forEach(word => {
-                    if (/\S/.test(word)) {
-                        const cleanWord = word.replace(/[.,!?;:()"']/g, '');
-                        if (cleanWord) {
-                            const button = document.createElement('button');
-                            button.textContent = word;
-                            button.className = 'interactive-word';
-                            button.setAttribute('aria-label', `Learn more about ${cleanWord}`);
-                            button.dataset.word = cleanWord;
-                            p.appendChild(button);
-                        } else {
-                           const span = document.createElement('span');
-                           span.textContent = word;
-                           p.appendChild(span);
-                        }
+            const words = fullContent.split(/(\s+)/);
+            words.forEach(word => {
+                if (/\S/.test(word)) {
+                    const cleanWord = word.replace(/[.,!?;:()"']/g, '');
+                    if (cleanWord) {
+                        const button = document.createElement('button');
+                        button.textContent = word;
+                        button.className = 'interactive-word';
+                        button.setAttribute('aria-label', `Learn more about ${cleanWord}`);
+                        button.dataset.word = cleanWord;
+                        p.appendChild(button);
                     } else {
                         const span = document.createElement('span');
                         span.textContent = word;
                         p.appendChild(span);
                     }
-                });
-            }
+                } else {
+                    const span = document.createElement('span');
+                    span.textContent = word;
+                    p.appendChild(span);
+                }
+            });
             contentDisplay.appendChild(p);
+        }
+
+        function displaySearchResults(results) {
+            searchResultsContainer.innerHTML = '';
+            searchResultsContainer.style.display = 'none';
+
+            if (!results || results.length === 0) return;
+
+            const validResults = results.filter(r => r.web && r.web.uri && r.web.title);
+            if (validResults.length === 0) return;
+
+            const heading = document.createElement('h3');
+            heading.className = 'search-results-heading';
+            heading.textContent = 'Top Web Result';
+            searchResultsContainer.appendChild(heading);
+
+            const topResult = validResults[0].web;
+
+            const item = document.createElement('div');
+            item.className = 'search-result';
+
+            const link = document.createElement('a');
+            link.className = 'search-result-link';
+            link.href = topResult.uri;
+            link.textContent = topResult.title;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+
+            const uri = document.createElement('p');
+            uri.className = 'search-result-uri';
+            uri.textContent = topResult.uri;
+            
+            item.appendChild(link);
+            item.appendChild(uri);
+            searchResultsContainer.appendChild(item);
+
+            searchResultsContainer.style.display = 'block';
         }
 
         function renderSkeletonLoader() {
@@ -373,31 +437,32 @@
 
             renderSkeletonLoader();
             displayAsciiArt({ art: '...' });
+            searchResultsContainer.style.display = 'none';
+            searchResultsContainer.innerHTML = '';
 
             try {
                 const artPromise = generateAsciiArt(currentTopic);
-                const definitionStream = streamDefinition(currentTopic);
+                const contentPromise = generateDefinitionAndSearchResults(currentTopic);
+                
+                const [artData, contentData] = await Promise.all([artPromise, contentPromise]);
 
-                artPromise.then(displayAsciiArt);
+                displayAsciiArt(artData);
 
-                let fullContent = '';
-                let isFirstChunk = true;
-                for await (const chunk of definitionStream) {
-                   if (isFirstChunk) {
-                       contentDisplay.innerHTML = '';
-                       isFirstChunk = false;
-                   }
-                   if (chunk.startsWith('Error:')) {
-                       throw new Error(chunk);
-                   }
-                   fullContent += chunk;
-                   displayContent(fullContent, true);
+                if (contentData.definition && contentData.definition.trim().length > 0) {
+                    contentDisplay.innerHTML = ''; // Clear skeleton
+                    displayContent(contentData.definition);
+                } else {
+                    throw new Error("No definition was generated. The topic might be too specific or new.");
                 }
-                displayContent(fullContent, false);
+                
+                displaySearchResults(contentData.searchResults);
+
             } catch (error) {
                 console.error("Error fetching topic:", error);
                 const userFriendlyMessage = error.message.includes('API key') 
                     ? 'API key is invalid or missing. Please check your configuration.'
+                    : error.message.includes("No definition")
+                    ? error.message
                     : `Failed to load content for "${currentTopic}". Please try another topic.`;
                 showError(userFriendlyMessage);
             } finally {
